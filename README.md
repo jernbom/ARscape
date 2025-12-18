@@ -1,7 +1,108 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# ARscape
+# **ARscape: Aggregate Antibody Reactivity Landscape Profiling**
 
 <!-- badges: start -->
 <!-- badges: end -->
+
+**ARscape** is a tool for the statistical analysis of Phage
+ImmunoPrecipitation Sequencing (PhIP-Seq) data. It provides a
+standardized approach for calculating **aggregate reactivity** -
+quantifying antibody responses not just to individual peptides, but to
+whole species, such as pathogens or allergens.
+
+This package is a statistical evolution of the original **ARscore**
+algorithm. It aims to improve the sensitivity and specificity of
+aggregate reactivity profiles by introducing calibrated null
+distribution modeling and refined p-value estimation.
+
+## **Methodology**
+
+PhIP-seq analyses typically begin by identifying enriched antibody
+reactivity to individual peptides. However, biological insights
+frequently require aggregating these signals to the protein or organism
+level.
+
+ARscape generates reactivity scores by comparing the average fold change
+of a biologically related group of peptides against a background
+distribution of randomly selected peptides.
+
+### **Key Improvements over ARscore**
+
+While retaining the core logic of the original algorithm, ARscape
+refactors the code, calibrates the statistical engine, and implements
+diagnostics:
+
+1.  **Calibrated Gamma Fitting:** The fit of gamma functions to sampled
+    null distributions is now explicitly calibrated to handle edge cases
+    in null distribution tails more robustly.  
+2.  **P-value Calibration:** The computation of p-values has been
+    calibrated, reducing false discovery rates by permitting p-value
+    based aggregate reactivity cutoffs.
+3.  **Modern Infrastructure:** The package has been refactored for
+    current R versions (4.4+), utilizing testthat for unit testing and
+    modularized functions.
+
+## **Provenance and Attribution**
+
+ARscape is a distinct fork and significant refactoring of the
+[**ARscore**](https://github.com/wmorgen1/ARscore) package.
+
+-   **Original Concept & Algorithm:** Developed by **William R.
+    Morgenlander, PhD**.  
+-   **Current Maintainer & Refactoring:** **August F. Jernbom, PhD**
+
+I gratefully acknowledge the foundational work provided by the original
+ARscore implementation. If you use ARscape in your research, please cite
+both this repository and the original methodology.
+
+## **Installation**
+
+You can install the development version of ARscape from
+[GitHub](https://github.com/) with:
+
+``` r
+install.packages("remotes")  
+remotes::install_github("jernbom/ARscape")
+```
+
+## **Usage**
+
+### **Basic Workflow**
+
+To load the package:
+
+`library(ARscape)`
+
+Input PhIP-Seq data generally follows Larman Lab naming conventions for
+mock IP controls, samples, and peptide annotations.
+
+Peptide grouping is currently based on the `taxon_species` annotation
+column, though this can be customized by users.
+
+*(Note: Documentation for new calibrated functions is currently in
+progress.)*
+
+## **References**
+
+The underlying statistical approach relies on:
+
+-   **fitdistrplus**: Delignette-Muller ML, Dutang C (2015).
+    fitdistrplus: An R Package for Fitting Distributions. Journal of
+    Statistical Software, 64(4), 1–34.
+-   **limma**: Ritchie ME, Phipson B, Wu D, Hu Y, Law CW, Shi W, Smyth
+    GK (2015). limma powers differential expression analyses for
+    RNA-sequencing and microarray studies. Nucleic Acids Research,
+    43(7), e47.
+-   **edgeR**:
+    -   Robinson MD, McCarthy DJ and Smyth GK (2010). edgeR: a
+        Bioconductor package for differential expression analysis of
+        digital gene expression data. Bioinformatics 26, 139-140.
+    -   McCarthy DJ, Chen Y and Smyth GK (2012). Differential expression
+        analysis of multifactor RNA-Seq experiments with respect to
+        biological variation. Nucleic Acids Research 40, 4288-4297.
+    -   Chen Y, Lun ATL, Smyth GK (2016). From reads to genes to
+        pathways: differential expression analysis of RNA-Seq
+        experiments using Rsubread and the edgeR quasi-likelihood
+        pipeline. F1000Research 5, 1438.
