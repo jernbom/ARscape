@@ -21,12 +21,12 @@
 #'
 #' @param fold_change Data frame containing peptide-level fold changes.
 #'   Must contain annotation columns (specified in `annotation_cols`) and sample columns.
-#' @param beads_controls Optional data frame of beads-only controls. If provided,
-#'   peptides with fold change > 1 in these controls are excluded.
-#'   Alternatively, provide a character vector of `bad_peptides` to skip this calculation.
-#' @param bad_peptides Optional character vector of peptide sequences/IDs to exclude manually.
+#' @param mock_ips Optional vector of column names in `hits_fold_change` corresponding to mock IP controls. If provided along with `hits_fold_change`,
+#'   peptides with hits in these controls are excluded.
+#'   In addition, a character vector of `excluded_peptides` can be provided to replace and/or supplement this peptide exclusion criterion.
+#' @param excluded_peptides Optional character vector of UNIQUE peptide identifiers to exclude manually. These peptide identifiers MUST be of the same type as the first element in `annotation_cols`, typically `u_pep_id`.
 #' @param annotation_cols Character vector of column names that are NOT samples.
-#'   Defaults to standard PhIP-seq annotations: `c("pep_aa", "taxon_species", "taxon_genus")`.
+#'   Defaults to standard PhIP-seq annotations in the Larman Lab: `c("u_pep_id", "pep_id", "pos_start", "pos_end", "UniProt_acc", "pep_aa", "taxon_genus", "taxon_species", "gene_symbol", "product")`. NB! The first vector element MUST refer to the column containing UNIQUE peptide identifiers (typically `u_pep_id`).
 #' @param max_iterations Integer; maximum number of iterations for the background definition algorithm.
 #' @param p_cutoff Numeric; -log10 p-value cutoff for defining positive hits. Default is 4 (-log10(0.0001)).
 #' @param score_cutoff Numeric; ARscore cutoff for defining positive hits. Default is 2.
@@ -43,9 +43,10 @@
 #' @importFrom progressr progressor
 #' @export
 run_arscape <- function(fold_change,
-                        beads_controls = NULL,
-                        bad_peptides = NULL,
-                        annotation_cols = c("pep_aa", "taxon_species", "taxon_genus"),
+                        hits_fold_change = NULL,
+                        mock_ips = NULL,
+                        excluded_peptides = NULL,
+                        annotation_cols = c("u_pep_id", "pep_id", "pos_start", "pos_end", "UniProt_acc", "pep_aa", "taxon_genus", "taxon_species", "gene_symbol", "product"),
                         max_iterations = 10,
                         p_cutoff = 10^-4,
                         score_cutoff = 2,
@@ -53,45 +54,45 @@ run_arscape <- function(fold_change,
                         exclusion_method = "genus") {
 
   # 1. Handle Beads / Peptide Exclusion
-  if (!is.null(beads_controls)) {
-    # Identify peptides reactive in beads (> 1 FC)
-    # We pivot to find any fc > 1 in any bead column
-    bead_hits <- beads_controls %>%
-      dplyr::select(any_of(c("pep_aa", annotation_cols)), everything()) %>%
+  if (!is.null(mock_ips) && !is.null(hits_fold_change)) {
+    # Identify peptides reactive in mock IPs.
+    mock_ip_hits <-
+      hits_fold_change %>%
+      dplyr::select(tidyselect::all_of(c(annotation_cols, mock_ips))) %>%
       tidyr::pivot_longer(
-        cols = -any_of(annotation_cols),
-        names_to = "sample",
-        values_to = "fc"
+        cols = -tidyselect::any_of(annotation_cols),
+        names_to = "sample_id",
+        values_to = "hfc"
       ) %>%
-      dplyr::filter(fc > 1) %>%
-      dplyr::distinct(pep_aa) %>%
-      dplyr::pull(pep_aa)
+      dplyr::filter(hfc>1) %>%
+      dplyr::pull(annotation_cols[[1]]) %>%
+      unique()
 
-    bad_peptides <- unique(c(bad_peptides, bead_hits))
+    excluded_peptides <- unique(c(excluded_peptides, mock_ip_hits))
   }
+
 
   # Filter Data
   clean_fc <- fold_change
-  if (!is.null(bad_peptides)) {
+  if (!is.null(excluded_peptides)) {
     clean_fc <- clean_fc %>%
-      dplyr::filter(!pep_aa %in% bad_peptides)
+      dplyr::filter(!.data[[annotation_cols[[1]]]] %in% excluded_peptides)
   }
 
   # 2. Pivot to Long Format and log2 transform fold changes
-  # Dynamic pivoting: assume everything NOT an annotation is a sample
   long_data <- clean_fc %>%
     tidyr::pivot_longer(
-      cols = -any_of(annotation_cols),
+      cols = -tidyselect::all_of(annotation_cols),
       names_to = "sample_id",
       values_to = "fc"
     ) %>%
-    mutate(log2fc = log2(fc)) %>%
+    mutate(log2fc = log2(fc) %>% {if_else(. > 0, ., 0)}) %>% # Log2FC floored to 0.
     select(-fc)
 
   # 3. Pre-calculate Group Metrics (Aggregation)
   # Sum scores and count peptides per species/genus/group
   grouped_metrics <- long_data %>%
-    dplyr::group_by(taxon_species, taxon_genus, sample_id) %>%
+    dplyr::group_by(taxon_species, taxon_genus, sample_id) %>% # Make taxon_species, taxon_genus dynamic.
     dplyr::summarise(
       score = sum(log2fc, na.rm = TRUE),
       total_peps = dplyr::n(),
