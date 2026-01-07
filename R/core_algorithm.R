@@ -27,7 +27,7 @@ calculate_landscape <- function(norm_log,
   set.seed(seed)
 
   # Representations: number of peptides to simulate distributions for
-  max_group_npep <- max(all_peptide_fcs$total_peps)
+  max_group_npep <- max(norm_log$total_peps)
   len_rep <- ceiling(log2(max_group_npep/30))
   representations <- 30*2^(0:len_rep)
 
@@ -58,7 +58,7 @@ calculate_landscape <- function(norm_log,
     })
 
     # Handle absolute zeros to prevent log(0) issues in gamma fitting later
-    sim_means[sim_means == 0] <- min(sim_means[sim_means != 0], na.rm = TRUE)
+    sim_means[sim_means == 0] <- min(sim_means[sim_means != 0], na.rm = TRUE)/2
 
     sim_matrix[i, ] <- sim_means
   }
