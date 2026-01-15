@@ -3,20 +3,14 @@
 #' The main wrapper function to process PhIP-Seq fold-change data and generate
 #' Aggregate Reactivity Scores (ARscores).
 #'
-#' @section Parallelization & Progress:
-#' This function leverages the `furrr` package for parallel processing and `progressr`
-#' for progress reporting.
+#' @section Parallelization
+#' This function leverages the `furrr` package for parallel processing.
 #'
 #' To enable parallel execution:
 #' \preformatted{
-#' future::plan(future::multisession, workers = parallelly::availableCores())
-#' }
-#'
-#' To enable progress reporting:
-#' \preformatted{
-#' progressr::with_progress({
-#'   run_arscape(...)
-#' })
+#' n_cores <- parallelly::availableCores()
+#' cl <- parallel::makeForkCluster(n_cores)
+#' future::plan(cluster, workers = cl)
 #' }
 #'
 #' @param fold_change Data frame containing peptide-level fold changes.
@@ -33,14 +27,14 @@
 #' @param min_peptides Integer; minimum number of peptides required per group to calculate a score. Default is 50.
 #' @param exclusion_method Character; method for excluding reactive peptides during iteration.
 #'   Options: "genus", "species", "group".
+#' @param progress_bar Logical; If using parallel processing, should a progress bar be displayed? No bar will be displayed if `future::plan(sequential)` is used, see `furrr::future_map()`.
 #'
 #' @return A data frame containing the final ARscores and p-values for all samples.
 #'
 #' @importFrom dplyr select filter group_by summarise mutate left_join anti_join pick everything all_of any_of n distinct bind_rows pull
 #' @importFrom tidyr pivot_longer
 #' @importFrom purrr map_dfr
-#' @importFrom furrr future_map_dfr furrr_options
-#' @importFrom progressr progressor
+#' @importFrom furrr future_pmap_dfr furrr_options
 #' @export
 run_arscape <- function(fold_change,
                         hits_fold_change = NULL,
@@ -51,7 +45,8 @@ run_arscape <- function(fold_change,
                         p_cutoff = 10^-4,
                         score_cutoff = 2,
                         min_peptides = 50,
-                        exclusion_method = "genus") {
+                        exclusion_method = "genus",
+                        progress_bar = FALSE) {
 
   # 1. Handle Beads / Peptide Exclusion
   if (!is.null(mock_ips) && !is.null(hits_fold_change)) {
@@ -64,7 +59,7 @@ run_arscape <- function(fold_change,
         names_to = "sample_id",
         values_to = "hfc"
       ) %>%
-      dplyr::filter(hfc>1) %>%
+      dplyr::filter(hfc > 1) %>%
       dplyr::pull(annotation_cols[[1]]) %>%
       unique()
 
@@ -92,7 +87,7 @@ run_arscape <- function(fold_change,
   # 3. Pre-calculate Group Metrics (Aggregation)
   # Sum scores and count peptides per species/genus/group
   grouped_metrics <- long_data %>%
-    dplyr::group_by(taxon_species, taxon_genus, sample_id) %>% # Make taxon_species, taxon_genus dynamic.
+    dplyr::group_by(taxon_species, taxon_genus, sample_id) %>% # Make taxon_species, taxon_genus dynamic if needed later
     dplyr::summarise(
       score = sum(log2fc, na.rm = TRUE),
       total_peps = dplyr::n(),
@@ -101,35 +96,49 @@ run_arscape <- function(fold_change,
     dplyr::mutate(score_norm = score / total_peps) %>%
     dplyr::filter(total_peps >= min_peptides)
 
-  # 4. Iterate over Samples
-  unique_samples <- unique(grouped_metrics$sample_id)
+  # 4. Prepare for Parallel Execution
+  # Identify valid samples (those that met the min_peptides criteria)
+  valid_samples <- unique(grouped_metrics$sample_id)
 
-  # Initialize progressor
-  p <- progressr::progressor(steps = length(unique_samples))
+  if (length(valid_samples) == 0) {
+    warning("No samples met the minimum peptide criteria.")
+    return(data.frame())
+  }
 
-  # Using future_map_dfr to loop and automatically bind rows in parallel
-  final_results <- furrr::future_map_dfr(unique_samples, function(current_sample) {
+  # Filter long_data to only valid samples to ensure alignment
+  long_data_subset <- long_data %>%
+    dplyr::filter(sample_id %in% valid_samples)
 
-    p() # Signal progress
+  grouped_metrics_list <- split(grouped_metrics, grouped_metrics$sample_id)
+  long_data_list <- split(long_data_subset, long_data_subset$sample_id)
 
-    # Subset data for this sample
-    sample_metrics <- grouped_metrics %>% dplyr::filter(sample_id == current_sample)
-    sample_peptides <- long_data %>% dplyr::filter(sample_id == current_sample)
+  rm(fold_change, hits_fold_change, clean_fc, long_data, grouped_metrics, long_data_subset)
+  gc()
+  print(lobstr::obj_sizes(grouped_metrics_list, long_data_list))
 
-    # Run the iterative algorithm
-    run_iterative_landscape(
-      norm_log = sample_metrics,
-      all_peptide_fcs = sample_peptides,
-      max_iterations = max_iterations,
-      p_cutoff = p_cutoff,
-      score_cutoff = score_cutoff,
-      exclusion_method = exclusion_method
+  # 5. Parallel Map
+  final_results <- furrr::future_pmap_dfr(
+    .l = list(
+      norm_log = grouped_metrics_list,
+      all_peptide_fcs = long_data_list
+    ),
+    .f = run_iterative_landscape,
+    max_iterations = max_iterations,
+    p_cutoff = p_cutoff,
+    score_cutoff = score_cutoff,
+    exclusion_method = exclusion_method,
+    .id = "sample_id",
+    .progress = progress_bar,
+    .options = furrr::furrr_options(
+      seed = TRUE,
+      globals = c("calculate_landscape"),
+      packages = c("stats", "fitdistrplus", "dplyr", "limma", "ARscape")
     )
-
-  }, .options = furrr::furrr_options(seed = TRUE))
+  )
 
   return(final_results)
 }
+
 
 #' Internal Iterative Solver
 #'
