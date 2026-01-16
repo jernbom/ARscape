@@ -166,7 +166,7 @@ run_iterative_landscape <- function(norm_log,
   while (iteration < max_iterations) {
 
     # Call the statistical engine
-    scores <- calculate_landscape(
+    scores <- calc_arscore(
       norm_log = norm_log,
       all_peptide_fcs = all_peptide_fcs,
       positives = current_positives,
