@@ -4,6 +4,3 @@
 .httr-oauth
 .DS_Store
 .quarto
-tests/*.html
-tests/results/
-tests/log/
