@@ -3,7 +3,7 @@
 #' The main wrapper function to process PhIP-Seq fold-change data and generate
 #' Aggregate Reactivity Scores (ARscores).
 #'
-#' @section Parallelization
+#' @section Parallelization:
 #' This function leverages the `furrr` package for parallel processing.
 #'
 #' To enable parallel execution:

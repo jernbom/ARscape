@@ -1,4 +1,4 @@
-#' Calculate Augmented Reactivity Landscape Scores
+#' Calculate Aggregate Reactivity Scores
 #'
 #' Generates aggregate reactivity scores by comparing the average fold change
 #' of a group of peptides to null distributions derived from random sampling.
@@ -17,11 +17,11 @@
 #' @importFrom dplyr filter mutate %>%
 #' @importFrom limma zscoreGamma
 #' @export
-calculate_landscape <- function(norm_log,
-                                all_peptide_fcs,
-                                positives,
-                                exclusion_method = "genus",
-                                seed = 120) {
+calc_arscore <- function(norm_log,
+                         all_peptide_fcs,
+                         positives,
+                         exclusion_method = "genus",
+                         seed = 120) {
 
   # Set seed for reproducibility
   set.seed(seed)
