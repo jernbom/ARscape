@@ -20,11 +20,7 @@
 calc_arscore <- function(norm_log,
                          all_peptide_fcs,
                          positives,
-                         exclusion_method = "genus",
-                         seed = 120) {
-
-  # Set seed for reproducibility
-  set.seed(seed)
+                         exclusion_method = "genus") {
 
   # Representations: number of peptides to simulate distributions for
   max_group_npep <- max(norm_log$total_peps)
