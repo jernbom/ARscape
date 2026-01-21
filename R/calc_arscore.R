@@ -86,6 +86,7 @@ calc_arscore <- function(norm_log,
         dist_info$rate[i] <- 1
       }
     } else {
+      warning(paste("Skipping Gamma fitting for n =", representations[i], "- No variance in data."))
       dist_info$shape[i] <- 1
       dist_info$rate[i] <- 1
     }
