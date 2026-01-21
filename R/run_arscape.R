@@ -160,6 +160,7 @@ run_iterative_landscape <- function(norm_log,
                                     score_cutoff,
                                     exclusion_method) {
 
+  message(unique(norm_log$sample_id))
   iteration <- 0
   # Start with empty positives (nothing excluded)
   # We create a dummy dataframe
@@ -171,6 +172,7 @@ run_iterative_landscape <- function(norm_log,
   scores <- NULL
 
   while (iteration < max_iterations) {
+    message(iteration)
 
     # Call the statistical engine
     scores <- calc_arscore(
