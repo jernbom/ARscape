@@ -65,6 +65,7 @@ calc_arscore <- function(norm_log,
     shape = NA_real_,
     rate = NA_real_
   )
+  gammafits <- list()
 
   for (i in seq_along(representations)) {
     valid_data <- sim_matrix[i, ]
@@ -80,44 +81,49 @@ calc_arscore <- function(norm_log,
       if (!is.null(fit)) {
         dist_info$shape[i] <- fit$estimate[["shape"]]
         dist_info$rate[i]  <- fit$estimate[["rate"]]
+        gammafits[[i]] <- gammafit
       } else {
         warning(paste("Gamma fit failed for n =", representations[i]))
         dist_info$shape[i] <- 1
         dist_info$rate[i] <- 1
+        gammafits[[i]] <- list()
       }
     } else {
       warning(paste("Skipping Gamma fitting for n =", representations[i], "- No variance in data."))
       dist_info$shape[i] <- 1
       dist_info$rate[i] <- 1
+      gammafits[[i]] <- list()
     }
   }
 
-  # 3. Spline Interpolation (Smoothing parameters across N)
-  # We work in log10 space for linearity
-  log_peps <- log10(dist_info$total_peps)
 
-  # Fit splines
-  shape_spline <- stats::smooth.spline(x = log_peps, y = log10(dist_info$shape), spar = 0.5)
-  rate_spline  <- stats::smooth.spline(x = log_peps, y = log10(dist_info$rate), spar = 0.5)
+  names(gammafits) <- representations
+
+  dist_info <- dist_info %>% mutate(mean = shape / rate) %>%
+    mutate(variance = shape / rate^2)
+
+  dist_info[["gammafits"]] <- gammafits
+
+  # 3. Spline Interpolation of Gamma Parameters
+  shape_spline <- stats::smooth.spline(x = log10(dist_info$total_peps), y = log10(dist_info$shape), spar = 0.5)
+  rate_spline  <- stats::smooth.spline(x = log10(dist_info$total_peps), y = log10(dist_info$rate), spar = 0.5)
 
   # 4. Apply to Data
   # Predict parameters for the actual 'total_peps' observed in the data
   results <- norm_log %>%
     dplyr::mutate(
-      pred_log_peps = log10(total_peps),
-      shape_pred = 10^(stats::predict(shape_spline, pred_log_peps)$y),
-      rate_pred  = 10^(stats::predict(rate_spline, pred_log_peps)$y),
-
-      # Metrics
-      mean_expected = shape_pred / rate_pred,
+      shape = 10^(stats::predict(shape_spline, log10(total_peps))$y),
+      rate  = 10^(stats::predict(rate_spline, log10(total_peps))$y),
 
       # Z-score Calculation
-      ARscore = limma::zscoreGamma(score_norm, shape = shape_pred, rate = rate_pred),
-      # Calculate P-values
+      ARscore = limma::zscoreGamma(score_norm, shape = shape, rate = rate),
+      # Calculate one-sided P-values
       p_val = stats::pnorm(ARscore, lower.tail = FALSE),
       nlog_p = -log10(p_val)
     )
 
-  return(results)
+  debug_results <- list(results, dist_info)
+
+  return(debug_results)
 }
 

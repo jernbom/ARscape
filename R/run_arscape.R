@@ -124,7 +124,7 @@ run_arscape <- function(fold_change,
   print(lobstr::obj_sizes(grouped_metrics_list, long_data_list))
 
   # 5. Parallel Map
-  final_results <- furrr::future_pmap_dfr(
+  final_results <- furrr::future_pmap(
     .l = list(
       norm_log = grouped_metrics_list,
       all_peptide_fcs = long_data_list
@@ -171,21 +171,28 @@ run_iterative_landscape <- function(norm_log,
 
   scores <- NULL
 
+  hits_log_debug <- list()
+
   while (iteration < max_iterations) {
     message(iteration)
 
     # Call the statistical engine
-    scores <- calc_arscore(
+    results_debug <- calc_arscore(
       norm_log = norm_log,
       all_peptide_fcs = all_peptide_fcs,
       positives = current_positives,
       exclusion_method = exclusion_method
     )
+    scores <- results_debug[[1]]
 
-    # Update criteria for "Positives" (Hits)
-    # Criterion 1: Significant p-val AND high score
+    # Update detected "Positives" (Hits)
     hits <- scores %>%
-      dplyr::filter(p_val < p_cutoff & ARscore > score_cutoff)
+      dplyr::filter(
+        (p_val < p_cutoff & ARscore > score_cutoff) |
+          (p_val < 10^-15)
+      )
+
+    hits_log_debug[[(iteration+1)]] <- hits
 
     # Merge unique hits
     new_positives <- hits %>%
@@ -204,12 +211,11 @@ run_iterative_landscape <- function(norm_log,
     iteration <- iteration + 1
   }
 
-  # Select final columns to return
-  output <- scores %>%
-    dplyr::select(
-      taxon_species, taxon_genus, sample_id,
-      total_peps, score_norm, ARscore, nlog_p
-    )
 
-  return(output)
+  output_debug <- list()
+  output_debug[[1]] <- scores
+  output_debug[[2]] <- hits_log_debug
+  output_debug[[3]] <- return_list[[2]]
+
+  return(output_debug)
 }
