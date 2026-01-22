@@ -19,6 +19,7 @@
 #' @export
 calc_arscore <- function(norm_log,
                          all_peptide_fcs,
+                         sample_id = "Unknown",
                          positives,
                          exclusion_method = "genus") {
 
@@ -68,34 +69,97 @@ calc_arscore <- function(norm_log,
   gammafits <- list()
 
   for (i in seq_along(representations)) {
+    # 1. Prepare Data
     valid_data <- sim_matrix[i, ]
     valid_data <- valid_data[valid_data > 0 & !is.na(valid_data)]
 
-    # Safety check for variance
-    if (length(valid_data) > 1 && stats::var(valid_data) > 0) {
-      # Use tryCatch to prevent crashing on convergence failure
-      fit <- tryCatch({
-        fitdistrplus::fitdist(valid_data, "gamma", control = list(maxit = 1000))
-      }, error = function(e) return(NULL))
+    # Placeholders for logic flow
+    fit <- NULL
+    fail_reason <- NULL
 
-      if (!is.null(fit)) {
-        dist_info$shape[i] <- fit$estimate[["shape"]]
-        dist_info$rate[i]  <- fit$estimate[["rate"]]
-        gammafits[[i]] <- gammafit
-      } else {
-        warning(paste("Gamma fit failed for n =", representations[i]))
-        dist_info$shape[i] <- 1
-        dist_info$rate[i] <- 1
-        gammafits[[i]] <- list()
-      }
+    # 2. Check Prerequisites
+    if (length(valid_data) <= 1 || stats::var(valid_data) <= 0) {
+      fail_reason <- "Skipping Gamma fitting - No variance in data or insufficient length."
     } else {
-      warning(paste("Skipping Gamma fitting for n =", representations[i], "- No variance in data."))
+
+      # 3. Attempt Fit with Warning Capture
+      fit <- tryCatch({
+        withCallingHandlers({
+          # Fit the model
+          fitdistrplus::fitdist(valid_data, "gamma",
+                                start = list(shape = 1, rate = 1),
+                                control = list(maxit = 1000))
+        }, warning = function(w) {
+          # --- WARNING FILTER ---
+          call_context <- if (!is.null(w$call)) paste(deparse(w$call), collapse = " ") else "Unknown"
+          is_nan_msg   <- w$message == "NaNs produced"
+          is_dist_func <- grepl("dgamma", call_context) || grepl("pgamma", call_context)
+
+          if (is_nan_msg && is_dist_func) {
+            # SILENT PATH: Muffle the noise and continue
+            invokeRestart("muffleWarning")
+          } else {
+            # LOUD PATH: This is an unexpected warning, so we log it!
+            warn_msg <- paste0(
+              "[WARNING] Sample: ", sample_id,
+              " | N-peps: ", representations[i],
+              "\n   Context: In ", call_context,
+              "\n   Msg: ", w$message,
+            )
+            message(warn_msg)
+            invokeRestart("muffleWarning")
+          }
+        })
+
+      }, error = function(e) {
+        # If it crashes completely, return the message string
+        return(e$message)
+      })
+
+      # If 'fit' is a character string, it means tryCatch caught an error
+      if (is.character(fit)) {
+        fail_reason <- fit
+        fit <- NULL
+      }
+    }
+
+    # 4. Process Outcomes
+    if (!is.null(fit)) {
+      # --- SUCCESS ---
+      dist_info$shape[i] <- fit$estimate[["shape"]]
+      dist_info$rate[i]  <- fit$estimate[["rate"]]
+      gammafits[[i]] <- fit
+
+    } else {
+      # --- FAILURE (From either Variance check OR fitdist crash) ---
+
+      # A. Capture the Debug Info
+      debug_text <- utils::capture.output({
+        cat("\n--- GAMMA FIT FAILURE ---\n")
+        cat("Reason:", fail_reason, "\n")
+        cat("Sample ID:", sample_id, "| N-peptides:", representations[i], "\n")
+
+        cat("Length of valid data:", length(valid_data), "\n")
+        cat("Variance of valid data:", if(length(valid_data) > 1) stats::var(valid_data) else "NA", "\n")
+
+        cat("Head of filtered data:\n")
+        print(head(valid_data))
+
+        cat("Summary of full simulation row (sim_matrix):\n")
+        # coerce to numeric to ensure summary works nicely
+        print(summary(as.numeric(sim_matrix[i, ])))
+        cat("---------------------------\n")
+      })
+
+      # B. Send to Main Log (using message to be parallel-safe)
+      message(paste(debug_text, collapse = "\n"))
+
+      # C. Set Fallbacks
       dist_info$shape[i] <- 1
-      dist_info$rate[i] <- 1
+      dist_info$rate[i]  <- 1
       gammafits[[i]] <- list()
     }
   }
-
 
   names(gammafits) <- representations
 
@@ -122,7 +186,7 @@ calc_arscore <- function(norm_log,
       nlog_p = -log10(p_val)
     )
 
-  debug_results <- list(results, dist_info)
+  debug_results <- list(results, dist_info, sim_matrix)
 
   return(debug_results)
 }
