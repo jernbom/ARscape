@@ -127,14 +127,15 @@ run_arscape <- function(fold_change,
   final_results <- furrr::future_pmap(
     .l = list(
       norm_log = grouped_metrics_list,
-      all_peptide_fcs = long_data_list
-    ),
+      all_peptide_fcs = long_data_list,
+      current_sample_id = names(long_data_list)
+      ),
     .f = run_iterative_landscape,
     max_iterations = max_iterations,
     p_cutoff = p_cutoff,
     score_cutoff = score_cutoff,
     exclusion_method = exclusion_method,
-    .id = "sample_id",
+    # .id = "sample_id",
     .progress = progress_bar,
     .options = furrr::furrr_options(
       seed = 120,
@@ -155,15 +156,15 @@ run_arscape <- function(fold_change,
 #' @noRd
 run_iterative_landscape <- function(norm_log,
                                     all_peptide_fcs,
+                                    current_sample_id,
                                     max_iterations,
                                     p_cutoff,
                                     score_cutoff,
                                     exclusion_method) {
 
-  message(unique(norm_log$sample_id))
+  message(paste("\nProcessing:", current_sample_id))
+
   iteration <- 0
-  # Start with empty positives (nothing excluded)
-  # We create a dummy dataframe
   current_positives <- norm_log[0, ]
 
   # Store history of positives to check for convergence
@@ -180,6 +181,7 @@ run_iterative_landscape <- function(norm_log,
     results_debug <- calc_arscore(
       norm_log = norm_log,
       all_peptide_fcs = all_peptide_fcs,
+      sample_id = current_sample_id,
       positives = current_positives,
       exclusion_method = exclusion_method
     )
@@ -215,7 +217,8 @@ run_iterative_landscape <- function(norm_log,
   output_debug <- list()
   output_debug[[1]] <- scores
   output_debug[[2]] <- hits_log_debug
-  output_debug[[3]] <- return_list[[2]]
+  output_debug[[3]] <- results_debug[[2]]
+  output_debug[[4]] <- results_debug[[3]]
 
   return(output_debug)
 }
