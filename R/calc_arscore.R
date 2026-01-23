@@ -183,8 +183,8 @@ calc_arscore <- function(norm_log,
       ARscore = limma::zscoreGamma(score_norm, shape = shape, rate = rate),
       # Calculate one-sided P-values
       p_val = stats::pnorm(ARscore, lower.tail = FALSE),
-      nlog_p = -log10(p_val)
-    )
+      nlog_p = -1 * stats::pnorm(ARscore, lower.tail = FALSE, log.p = TRUE) / log(10)
+      )
 
   debug_results <- list(results, dist_info, sim_matrix)
 
