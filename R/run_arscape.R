@@ -3,7 +3,7 @@
 #' The main wrapper function to process PhIP-Seq fold-change data and generate
 #' Aggregate Reactivity Scores (ARscores).
 #'
-#' @section Parallelization
+#' @section Parallelization:
 #' This function leverages the `furrr` package for parallel processing.
 #'
 #' To enable parallel execution:
@@ -97,22 +97,29 @@ run_arscape <- function(fold_change,
     dplyr::filter(total_peps >= min_peptides)
 
   # 4. Prepare for Parallel Execution
-  # Identify valid samples (those that met the min_peptides criteria)
-  valid_samples <- unique(grouped_metrics$sample_id)
+  # Identify valid species (those that met the min_peptides criteria)
+  valid_species <-
+    grouped_metrics %>%
+    dplyr::transmute(genus_species = paste0(taxon_genus, "_", taxon_species)) %>%
+    dplyr::pull(genus_species) %>%
+    unique()
 
-  if (length(valid_samples) == 0) {
-    warning("No samples met the minimum peptide criteria.")
+  if (length(valid_species) == 0) {
+    warning("No species met the minimum peptide criteria.")
     return(data.frame())
   }
 
-  # Filter long_data to only valid samples to ensure alignment
-  long_data_subset <- long_data %>%
-    dplyr::filter(sample_id %in% valid_samples)
+  # Filter long_data to only valid species to ensure alignment
+  long_data <-
+    long_data %>%
+    dplyr::mutate(genus_species = paste0(taxon_genus, "_", taxon_species)) %>%
+    dplyr::filter(genus_species %in% valid_species) %>%
+    dplyr::select(-genus_species)
 
   grouped_metrics_list <- split(grouped_metrics, grouped_metrics$sample_id)
-  long_data_list <- split(long_data_subset, long_data_subset$sample_id)
+  long_data_list <- split(long_data, long_data$sample_id)
 
-  rm(fold_change, hits_fold_change, clean_fc, long_data, grouped_metrics, long_data_subset)
+  rm(fold_change, hits_fold_change, clean_fc, long_data, grouped_metrics)
   gc()
   print(lobstr::obj_sizes(grouped_metrics_list, long_data_list))
 
@@ -130,7 +137,7 @@ run_arscape <- function(fold_change,
     .id = "sample_id",
     .progress = progress_bar,
     .options = furrr::furrr_options(
-      seed = TRUE,
+      seed = 120,
       globals = c("calculate_landscape"),
       packages = c("stats", "fitdistrplus", "dplyr", "limma", "ARscape")
     )
@@ -166,7 +173,7 @@ run_iterative_landscape <- function(norm_log,
   while (iteration < max_iterations) {
 
     # Call the statistical engine
-    scores <- calculate_landscape(
+    scores <- calc_arscore(
       norm_log = norm_log,
       all_peptide_fcs = all_peptide_fcs,
       positives = current_positives,
