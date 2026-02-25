@@ -121,7 +121,6 @@ run_arscape <- function(fold_change,
 
   rm(fold_change, hits_fold_change, clean_fc, long_data, grouped_metrics)
   gc()
-  print(lobstr::obj_sizes(grouped_metrics_list, long_data_list))
 
   # 5. Parallel Map
   final_results <- furrr::future_pmap(
@@ -134,7 +133,6 @@ run_arscape <- function(fold_change,
     p_cutoff = p_cutoff,
     score_cutoff = score_cutoff,
     exclusion_method = exclusion_method,
-    .id = "sample_id",
     .progress = progress_bar,
     .options = furrr::furrr_options(
       seed = 120,
@@ -215,7 +213,7 @@ run_iterative_landscape <- function(norm_log,
   output_debug <- list()
   output_debug[[1]] <- scores
   output_debug[[2]] <- hits_log_debug
-  output_debug[[3]] <- return_list[[2]]
+  output_debug[[3]] <- results_debug[[2]]
 
   return(output_debug)
 }

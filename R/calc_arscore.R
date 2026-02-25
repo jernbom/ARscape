@@ -81,7 +81,7 @@ calc_arscore <- function(norm_log,
       if (!is.null(fit)) {
         dist_info$shape[i] <- fit$estimate[["shape"]]
         dist_info$rate[i]  <- fit$estimate[["rate"]]
-        gammafits[[i]] <- gammafit
+        gammafits[[i]] <- fit
       } else {
         warning(paste("Gamma fit failed for n =", representations[i]))
         dist_info$shape[i] <- 1
