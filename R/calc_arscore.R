@@ -73,29 +73,48 @@ calc_arscore <- function(norm_log,
 
     # Safety check for variance
     if (length(valid_data) > 1 && stats::var(valid_data) > 0) {
-      # Use tryCatch to prevent crashing on convergence failure
+
+      # Use tryCatch for errors and withCallingHandlers for targeted warning suppression
       fit <- tryCatch({
-        fitdistrplus::fitdist(valid_data, "gamma", control = list(maxit = 1000))
-      }, error = function(e) return(NULL))
+        withCallingHandlers(
+          expr = fitdistrplus::fitdist(valid_data, "gamma", control = list(maxit = 1000)),
+          warning = function(w) {
+            # 1. Silently suppress "NaNs produced"
+            if (grepl("NaNs produced", conditionMessage(w))) {
+              invokeRestart("muffleWarning")
+            }
+            # 2 & 3. Other warnings bypass this and print natively without unmasking internals
+          }
+        )
+      }, error = function(e) {
+        # 4. Errors print to console and break execution
+        message(sprintf("Error during Gamma fitting for n = %d: %s", representations[i], conditionMessage(e)))
+        stop(e)
+
+        # NOTE: If you prefer to preserve Rule 5 (the fallback to shape/rate = 1) instead
+        # of crashing the pipeline, comment out `stop(e)` above and uncomment `return(NULL)` below:
+        # return(NULL)
+      })
 
       if (!is.null(fit)) {
         dist_info$shape[i] <- fit$estimate[["shape"]]
         dist_info$rate[i]  <- fit$estimate[["rate"]]
         gammafits[[i]] <- fit
       } else {
+        # 5. Warning issued if shape and rate are Null (Fallback logic, currently inactive as tryCatch currently stops on error, see above.)
         warning(paste("Gamma fit failed for n =", representations[i]))
         dist_info$shape[i] <- 1
         dist_info$rate[i] <- 1
         gammafits[[i]] <- list()
       }
     } else {
+      # 6. Skip fitting if there is no variance
       warning(paste("Skipping Gamma fitting for n =", representations[i], "- No variance in data."))
       dist_info$shape[i] <- 1
       dist_info$rate[i] <- 1
       gammafits[[i]] <- list()
     }
   }
-
 
   names(gammafits) <- representations
 
@@ -126,4 +145,3 @@ calc_arscore <- function(norm_log,
 
   return(debug_results)
 }
-
