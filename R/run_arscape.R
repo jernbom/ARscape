@@ -138,7 +138,7 @@ run_arscape <- function(fold_change,
     .progress = progress_bar,
     .options = furrr::furrr_options(
       seed = 120,
-      globals = c("calculate_landscape"),
+      globals = c("calc_arscore"),
       packages = c("stats", "fitdistrplus", "dplyr", "limma", "ARscape")
     )
   )
