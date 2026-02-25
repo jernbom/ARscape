@@ -79,18 +79,17 @@ calc_arscore <- function(norm_log,
         withCallingHandlers(
           expr = fitdistrplus::fitdist(valid_data, "gamma", control = list(maxit = 1000)),
           warning = function(w) {
-            # 1. Silently suppress "NaNs produced"
-            if (grepl("NaNs produced", conditionMessage(w))) {
+            # Silently suppress the NaN warning and the cov2cor warning
+            if (grepl("NaNs produced|diag\\(V\\) had non-positive", conditionMessage(w))) {
               invokeRestart("muffleWarning")
             }
-            # 2 & 3. Other warnings bypass this and print natively without unmasking internals
+            # All other warnings bypass this and print natively
           }
         )
       }, error = function(e) {
-        # 4. Errors print to console and break execution
+        # Errors print to console and break execution
         message(sprintf("Error during Gamma fitting for n = %d: %s", representations[i], conditionMessage(e)))
         stop(e)
-
         # NOTE: If you prefer to preserve Rule 5 (the fallback to shape/rate = 1) instead
         # of crashing the pipeline, comment out `stop(e)` above and uncomment `return(NULL)` below:
         # return(NULL)
