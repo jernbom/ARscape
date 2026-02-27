@@ -54,7 +54,7 @@ calc_arscore <- function(norm_log,
     })
 
     # Handle absolute zeros to prevent log(0) issues in gamma fitting later
-    sim_means[sim_means == 0] <- min(sim_means[sim_means != 0], na.rm = TRUE)/2
+    sim_means[sim_means <= 0] <- min(sim_means[sim_means > 0], na.rm = TRUE)/2
 
     sim_matrix[i, ] <- sim_means
   }
