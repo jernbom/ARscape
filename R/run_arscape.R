@@ -94,10 +94,10 @@ run_arscape <- function(fold_change,
       .groups = "drop"
     ) %>%
     dplyr::mutate(score_norm = score / total_peps) %>%
-    # Floor score_norm to half minimum positive value of sample (to match null distributions in calc_arscore)
-    dplyr::group_by(sample_id) %>%
-    dplyr::mutate(score_norm = score_norm %>% {replace(., . <= 0, min(.[. > 0], na.rm = TRUE) / 2)}) %>% # score_norm floored to 0
-    dplyr::ungroup() %>%
+    # # Floor score_norm to half minimum positive value of sample (to match null distributions in calc_arscore)
+    # dplyr::group_by(sample_id) %>%
+    # dplyr::mutate(score_norm = score_norm %>% {replace(., . <= 0, min(.[. > 0], na.rm = TRUE) / 2)}) %>% # score_norm floored to 0
+    # dplyr::ungroup() %>%
     dplyr::filter(total_peps >= min_peptides)
 
   # 4. Prepare for Parallel Execution

@@ -54,10 +54,15 @@ calc_arscore <- function(norm_log,
     })
 
     # Handle absolute zeros to prevent log(0) issues in gamma fitting later
-    sim_means[sim_means <= 0] <- min(sim_means[sim_means > 0], na.rm = TRUE)/2
+    # sim_means[sim_means <= 0] <- min(sim_means[sim_means > 0], na.rm = TRUE)/2
 
     sim_matrix[i, ] <- sim_means
   }
+
+  # Shift null and data (sim_matrix and score_norm) to min = 1
+  shift_factor <- min(min(sim_matrix, na.rm = TRUE), min(norm_log$score_norm, na.rm = TRUE), na.rm = TRUE) + 1
+  sim_matrix <- sim_matrix + shift_factor
+  norm_log$score_norm <- norm_log$score_norm + shift_factor
 
   # 2. Fit Gamma Distributions
   dist_info <- data.frame(
