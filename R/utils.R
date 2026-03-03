@@ -33,10 +33,15 @@ zscoreSN <- function(q, xi = 0, omega = 1, alpha = 0, tau = 0) {
   # Split the data into upper and lower halves based on the mean
   up <- (q > mean_sn)
 
+  # Note on mapply: sn::psn contains an internal bug where it fails if the `tau`
+  # parameter is passed as a vector alongside `alpha` due to a strict `if` condition.
+  # We use mapply to evaluate the probabilities element-wise to bypass this issue.
+
   # --- LOWER TAIL ---
   # For values below the mean, standard CDF works perfectly.
   if (any(!up)) {
-    p_lower <- sn::psn(q[!up], xi = xi[!up], omega = omega[!up], alpha = alpha[!up], tau = tau[!up])
+    p_lower <- mapply(sn::psn, x = q[!up], xi = xi[!up], omega = omega[!up],
+                      alpha = alpha[!up], tau = tau[!up], USE.NAMES = FALSE)
 
     # Convert probability to Z-score
     z[!up] <- qnorm(p_lower, lower.tail = TRUE)
@@ -48,7 +53,8 @@ zscoreSN <- function(q, xi = 0, omega = 1, alpha = 0, tau = 0) {
   # Instead, we use the symmetry property: P(X > x) == P(-X < -x)
   # where -X follows a Skew-Normal with negated location and slant (tau remains unchanged).
   if (any(up)) {
-    p_upper <- sn::psn(-q[up], xi = -xi[up], omega = omega[up], alpha = -alpha[up], tau = tau[up])
+    p_upper <- mapply(sn::psn, x = -q[up], xi = -xi[up], omega = omega[up],
+                      alpha = -alpha[up], tau = tau[up], USE.NAMES = FALSE)
 
     # Convert the upper-tail probability directly to a positive Z-score
     z[up] <- qnorm(p_upper, lower.tail = FALSE)
