@@ -83,8 +83,8 @@ calc_arscore <- function(norm_log,
         withCallingHandlers(
           expr = fitdistrplus::fitdist(valid_data, "sn", start = start_vals, fix.arg = list(tau = 0), control = list(maxit = 1000)),
           warning = function(w) {
-            # Silently suppress optimization warnings related to NaNs or covariance
-            if (grepl("NaNs produced|diag\\(V\\) had non-positive", conditionMessage(w))) {
+            # Silently suppress optimization warnings and fitdistrplus validation checks for the 'sn' package
+            if (grepl("NaNs produced|diag\\(V\\) had non-positive|zero-length vector|first argument named", conditionMessage(w))) {
               invokeRestart("muffleWarning")
             }
           }
