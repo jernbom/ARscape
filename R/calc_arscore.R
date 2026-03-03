@@ -10,12 +10,12 @@
 #'   Options: "genus", "species", "group".
 #' @param seed Integer seed for reproducibility of random sampling.
 #'
-#' @return A data frame with added columns for shape, rate, mean, variance, ARscore, and p_val.
+#' @return A data frame with added columns for xi, omega, alpha, mean, variance, ARscore, and p_val.
 #'
-#' @importFrom stats lm predict pnorm smooth.spline var rnorm
+#' @importFrom stats lm predict pnorm smooth.spline var sd
 #' @importFrom fitdistrplus fitdist
-#' @importFrom dplyr filter mutate %>%
-#' @importFrom limma zscoreGamma
+#' @importFrom dplyr filter mutate %>% select
+#' @importFrom sn psn dsn qsn rsn
 #' @export
 calc_arscore <- function(norm_log,
                          all_peptide_fcs,
@@ -26,7 +26,6 @@ calc_arscore <- function(norm_log,
   max_group_npep <- max(norm_log$total_peps)
   len_rep <- ceiling(log2(max_group_npep/30))
   representations <- 30*2^(0:len_rep)
-
 
   # Filter out known positives from the background pool
   if (exclusion_method %in% c("species", "group")) {
@@ -53,93 +52,102 @@ calc_arscore <- function(norm_log,
       mean(sample(pool_values, n, replace = FALSE))
     })
 
-    # Handle absolute zeros to prevent log(0) issues in gamma fitting later
-    # sim_means[sim_means <= 0] <- min(sim_means[sim_means > 0], na.rm = TRUE)/2
-
     sim_matrix[i, ] <- sim_means
   }
 
-  # Shift null and data (sim_matrix and score_norm) to min = 1
-  shift_factor <- min(min(sim_matrix, na.rm = TRUE), min(norm_log$score_norm, na.rm = TRUE), na.rm = TRUE) + 1
-  sim_matrix <- sim_matrix + shift_factor
-  norm_log$score_norm <- norm_log$score_norm + shift_factor
-
-  # 2. Fit Gamma Distributions
+  # 2. Fit Skew-Normal Distributions
   dist_info <- data.frame(
     total_peps = representations,
-    shape = NA_real_,
-    rate = NA_real_
+    xi = NA_real_,
+    omega = NA_real_,
+    alpha = NA_real_
   )
-  gammafits <- list()
+  fits <- list()
 
   for (i in seq_along(representations)) {
     valid_data <- sim_matrix[i, ]
-    valid_data <- valid_data[valid_data > 0 & !is.na(valid_data)]
+    valid_data <- valid_data[!is.na(valid_data)]
 
     # Safety check for variance
     if (length(valid_data) > 1 && stats::var(valid_data) > 0) {
 
+      # Compute starting values: assume normality to kick off optimization
+      start_vals <- list(
+        xi = mean(valid_data),
+        omega = stats::sd(valid_data),
+        alpha = 0
+      )
+
       # Use tryCatch for errors and withCallingHandlers for targeted warning suppression
       fit <- tryCatch({
         withCallingHandlers(
-          expr = fitdistrplus::fitdist(valid_data, "gamma", control = list(maxit = 1000)),
+          expr = fitdistrplus::fitdist(valid_data, "sn", start = start_vals, fix.arg = list(tau = 0), control = list(maxit = 1000)),
           warning = function(w) {
-            # Silently suppress the NaN warning and the cov2cor warning
+            # Silently suppress optimization warnings related to NaNs or covariance
             if (grepl("NaNs produced|diag\\(V\\) had non-positive", conditionMessage(w))) {
               invokeRestart("muffleWarning")
             }
-            # All other warnings bypass this and print natively
           }
         )
       }, error = function(e) {
-        # Errors print to console and break execution
-        message(sprintf("Error during Gamma fitting for n = %d: %s", representations[i], conditionMessage(e)))
+        message(sprintf("Error during fitting for n = %d: %s", representations[i], conditionMessage(e)))
         stop(e)
-        # NOTE: If you prefer to preserve Rule 5 (the fallback to shape/rate = 1) instead
-        # of crashing the pipeline, comment out `stop(e)` above and uncomment `return(NULL)` below:
-        # return(NULL)
       })
 
       if (!is.null(fit)) {
-        dist_info$shape[i] <- fit$estimate[["shape"]]
-        dist_info$rate[i]  <- fit$estimate[["rate"]]
-        gammafits[[i]] <- fit
-      } else {
-        # 5. Warning issued if shape and rate are Null (Fallback logic, currently inactive as tryCatch currently stops on error, see above.)
-        warning(paste("Gamma fit failed for n =", representations[i]))
-        dist_info$shape[i] <- 1
-        dist_info$rate[i] <- 1
-        gammafits[[i]] <- list()
+        dist_info$xi[i]    <- fit$estimate[["xi"]]
+        dist_info$omega[i] <- fit$estimate[["omega"]]
+        dist_info$alpha[i] <- fit$estimate[["alpha"]]
+        fits[[i]] <- fit
+      } else { # This else block is currently inactive as tryCatch currently stops on error.
+        warning(sprintf("SN fit failed for n = %d. Using starting values: xi = %.4f, omega = %.4f, alpha = %.4f",
+                        representations[i], start_vals$xi, start_vals$omega, start_vals$alpha))
+        dist_info$xi[i]    <- start_vals$xi
+        dist_info$omega[i] <- start_vals$omega
+        dist_info$alpha[i] <- start_vals$alpha
+        fits[[i]] <- list()
       }
     } else {
       # 6. Skip fitting if there is no variance
-      warning(paste("Skipping Gamma fitting for n =", representations[i], "- No variance in data."))
-      dist_info$shape[i] <- 1
-      dist_info$rate[i] <- 1
-      gammafits[[i]] <- list()
+      warning(paste("Skipping fitting for n =", representations[i], "- No variance in data."))
+      dist_info$xi[i]    <- mean(valid_data)
+      dist_info$omega[i] <- 1e-6
+      dist_info$alpha[i] <- 0
+      fits[[i]] <- list()
     }
   }
 
-  names(gammafits) <- representations
+  names(fits) <- representations
 
-  dist_info <- dist_info %>% mutate(mean = shape / rate) %>%
-    mutate(variance = shape / rate^2)
+  # Calculate theoretical mean and variance of the SN for QC purposes
+  dist_info <- dist_info %>%
+    dplyr::mutate(
+      delta = alpha / sqrt(1 + alpha^2),
+      mean = xi + omega * delta * sqrt(2 / pi),
+      variance = omega^2 * (1 - 2 * delta^2 / pi)
+    ) %>%
+    dplyr::select(-delta)
 
-  dist_info[["gammafits"]] <- gammafits
+  dist_info[["fits"]] <- fits
 
-  # 3. Spline Interpolation of Gamma Parameters
-  shape_spline <- stats::smooth.spline(x = log10(dist_info$total_peps), y = log10(dist_info$shape), spar = 0.5)
-  rate_spline  <- stats::smooth.spline(x = log10(dist_info$total_peps), y = log10(dist_info$rate), spar = 0.5)
+  # 3. Spline Interpolation of SN Parameters
+  # Note: xi and alpha can be negative, so we interpolate them on linear scale.
+  # omega is strictly positive scale, so log10 remains safer.
+  xi_spline    <- stats::smooth.spline(x = log10(dist_info$total_peps), y = dist_info$xi, spar = 0.5)
+  omega_spline <- stats::smooth.spline(x = log10(dist_info$total_peps), y = log10(dist_info$omega), spar = 0.5)
+  alpha_spline <- stats::smooth.spline(x = log10(dist_info$total_peps), y = dist_info$alpha, spar = 0.5)
 
   # 4. Apply to Data
   # Predict parameters for the actual 'total_peps' observed in the data
   results <- norm_log %>%
     dplyr::mutate(
-      shape = 10^(stats::predict(shape_spline, log10(total_peps))$y),
-      rate  = 10^(stats::predict(rate_spline, log10(total_peps))$y),
+      xi    = stats::predict(xi_spline, log10(total_peps))$y,
+      omega = 10^(stats::predict(omega_spline, log10(total_peps))$y),
+      alpha = stats::predict(alpha_spline, log10(total_peps))$y,
 
-      # Z-score Calculation
-      ARscore = limma::zscoreGamma(score_norm, shape = shape, rate = rate),
+      # Z-score Calculation via our custom SN function
+      ARscore = zscoreSN(score_norm, xi = xi, omega = omega, alpha = alpha),
+
       # Calculate one-sided P-values
       p_val = stats::pnorm(ARscore, lower.tail = FALSE),
       nlog_p = -1 * stats::pnorm(ARscore, lower.tail = FALSE, log.p = TRUE) / log(10)
