@@ -2,6 +2,7 @@
 #'
 #' Generates aggregate reactivity scores by comparing the average fold change
 #' of a group of peptides to null distributions derived from random sampling.
+#' Assumes a Gaussian (Normal) null distribution.
 #'
 #' @param norm_log Data frame containing intermediate reactivity metrics.
 #' @param all_peptide_fcs Data frame containing all peptide fold changes for an individual sample.
@@ -10,12 +11,10 @@
 #'   Options: "genus", "species", "group".
 #' @param seed Integer seed for reproducibility of random sampling.
 #'
-#' @return A data frame with added columns for xi, omega, alpha, mean, variance, ARscore, and p_val.
+#' @return A data frame with added columns for mean, sd, ARscore, p_val, and nlog_p.
 #'
-#' @importFrom stats lm predict pnorm smooth.spline var sd
-#' @importFrom fitdistrplus fitdist
-#' @importFrom dplyr filter mutate %>% select
-#' @importFrom sn psn dsn qsn rsn
+#' @importFrom stats predict pnorm smooth.spline var sd dnorm
+#' @importFrom dplyr filter mutate select
 #' @export
 calc_arscore <- function(norm_log,
                          all_peptide_fcs,
@@ -55,12 +54,13 @@ calc_arscore <- function(norm_log,
     sim_matrix[i, ] <- sim_means
   }
 
-  # 2. Fit Skew-Normal Distributions
+  # 2. Calculate Gaussian Parameters (Mean and SD)
+  # For a normal distribution, the Maximum Likelihood Estimates (MLE) are exactly
+  # the sample mean and standard deviation. No numerical fitting required!
   dist_info <- data.frame(
     total_peps = representations,
-    xi = NA_real_,
-    omega = NA_real_,
-    alpha = NA_real_
+    mean = NA_real_,
+    sd = NA_real_
   )
   fits <- list()
 
@@ -70,83 +70,40 @@ calc_arscore <- function(norm_log,
 
     # Safety check for variance
     if (length(valid_data) > 1 && stats::var(valid_data) > 0) {
-
-      # Compute starting values: assume normality to kick off optimization
-      start_vals <- list(
-        xi = mean(valid_data),
-        omega = stats::sd(valid_data),
-        alpha = 0
-      )
-
-      # Use tryCatch for errors and withCallingHandlers for targeted warning suppression
-      fit <- tryCatch({
-        withCallingHandlers(
-          expr = fitdistrplus::fitdist(valid_data, "sn", start = start_vals, fix.arg = list(tau = 0), control = list(maxit = 1000)),
-          warning = function(w) {
-            # Silently suppress optimization warnings and fitdistrplus validation checks for the 'sn' package
-            if (grepl("NaNs produced|diag\\(V\\) had non-positive|zero-length vector|first argument named", conditionMessage(w))) {
-              invokeRestart("muffleWarning")
-            }
-          }
-        )
-      }, error = function(e) {
-        message(sprintf("Error during fitting for n = %d: %s", representations[i], conditionMessage(e)))
-        stop(e)
-      })
-
-      if (!is.null(fit)) {
-        dist_info$xi[i]    <- fit$estimate[["xi"]]
-        dist_info$omega[i] <- fit$estimate[["omega"]]
-        dist_info$alpha[i] <- fit$estimate[["alpha"]]
-        fits[[i]] <- fit
-      } else { # This else block is currently inactive as tryCatch currently stops on error.
-        warning(sprintf("SN fit failed for n = %d. Using starting values: xi = %.4f, omega = %.4f, alpha = %.4f",
-                        representations[i], start_vals$xi, start_vals$omega, start_vals$alpha))
-        dist_info$xi[i]    <- start_vals$xi
-        dist_info$omega[i] <- start_vals$omega
-        dist_info$alpha[i] <- start_vals$alpha
-        fits[[i]] <- list()
-      }
+      dist_info$mean[i] <- mean(valid_data)
+      dist_info$sd[i]   <- stats::sd(valid_data)
     } else {
-      # 6. Skip fitting if there is no variance
-      warning(paste("Skipping fitting for n =", representations[i], "- No variance in data."))
-      dist_info$xi[i]    <- mean(valid_data)
-      dist_info$omega[i] <- 1e-6
-      dist_info$alpha[i] <- 0
-      fits[[i]] <- list()
+      # Skip if there is no variance
+      warning(paste("No variance in null data for n =", representations[i], "- using fallback values."))
+      dist_info$mean[i] <- mean(valid_data)
+      dist_info$sd[i]   <- 1e-6
     }
+
+    # Store a pseudo-fit object to preserve compatibility with quantile extraction
+    fits[[i]] <- list(
+      data = valid_data,
+      estimate = list(mean = dist_info$mean[i], sd = dist_info$sd[i])
+    )
   }
 
   names(fits) <- representations
+  dist_info$fits <- fits
 
-  # Calculate theoretical mean and variance of the SN for QC purposes
-  dist_info <- dist_info %>%
-    dplyr::mutate(
-      delta = alpha / sqrt(1 + alpha^2),
-      mean = xi + omega * delta * sqrt(2 / pi),
-      variance = omega^2 * (1 - 2 * delta^2 / pi)
-    ) %>%
-    dplyr::select(-delta)
-
-  dist_info[["fits"]] <- fits
-
-  # 3. Spline Interpolation of SN Parameters
-  # Note: xi and alpha can be negative, so we interpolate them on linear scale.
-  # omega is strictly positive scale, so log10 remains safer.
-  xi_spline    <- stats::smooth.spline(x = log10(dist_info$total_peps), y = dist_info$xi, spar = 0.5)
-  omega_spline <- stats::smooth.spline(x = log10(dist_info$total_peps), y = log10(dist_info$omega), spar = 0.5)
-  alpha_spline <- stats::smooth.spline(x = log10(dist_info$total_peps), y = dist_info$alpha, spar = 0.5)
+  # 3. Spline Interpolation of Normal Parameters
+  # Mean can be negative, so we interpolate on linear scale.
+  # SD is strictly positive, so log10 remains safer to prevent predicting negative SDs.
+  mean_spline <- stats::smooth.spline(x = log10(dist_info$total_peps), y = dist_info$mean, spar = 0.5)
+  sd_spline   <- stats::smooth.spline(x = log10(dist_info$total_peps), y = log10(dist_info$sd), spar = 0.5)
 
   # 4. Apply to Data
   # Predict parameters for the actual 'total_peps' observed in the data
   results <- norm_log %>%
     dplyr::mutate(
-      xi    = stats::predict(xi_spline, log10(total_peps))$y,
-      omega = 10^(stats::predict(omega_spline, log10(total_peps))$y),
-      alpha = stats::predict(alpha_spline, log10(total_peps))$y,
+      null_mean = stats::predict(mean_spline, log10(total_peps))$y,
+      null_sd   = 10^(stats::predict(sd_spline, log10(total_peps))$y),
 
-      # Z-score Calculation via our custom SN function
-      ARscore = zscoreSN(score_norm, xi = xi, omega = omega, alpha = alpha),
+      # Z-score Calculation (Standard algebraic normal standardisation)
+      ARscore = (score_norm - null_mean) / null_sd,
 
       # Calculate one-sided P-values
       p_val = stats::pnorm(ARscore, lower.tail = FALSE),
