@@ -37,10 +37,10 @@ calc_arscore <- function(norm_log,
 
   pool_values <- background_pool$log2fc
 
-  # Clean the source data and warn if NAs are present
-  if (any(is.na(pool_values))) {
-    warning("Unexpected NAs found in pool_values (background_pool$log2fc). Dropping NAs prior to simulation.")
-    pool_values <- pool_values[!is.na(pool_values)]
+  # Clean the source data
+  if (any(!is.finite(pool_values))) {
+    warning("NAs or Infinite values found in pool_values. Dropping prior to simulation.")
+    pool_values <- pool_values[is.finite(pool_values)]
   }
 
   # Pre-allocate matrix for simulation results
@@ -102,9 +102,8 @@ calc_arscore <- function(norm_log,
   dist_info$fits <- fits
 
   # Sanitize dist_info before the spline
-  # Now we just need to drop the skipped representations (where mean/sd are NA)
   dist_clean <- dist_info %>%
-    dplyr::filter(!is.na(mean), !is.na(sd))
+    dplyr::filter(is.finite(mean), is.finite(sd))
 
   # Enforce a minimum data point check
   # smooth.spline requires >= 4 unique x values
