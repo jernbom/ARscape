@@ -69,7 +69,7 @@ calc_arscore <- function(norm_log,
     valid_data <- valid_data[!is.na(valid_data)]
 
     # Safety check for variance
-    if (length(valid_data) > 1 && stats::var(valid_data) > 0) {
+    if (length(valid_data) > 1 && isTRUE(stats::var(valid_data) > 0) ) {
       dist_info$mean[i] <- mean(valid_data)
       dist_info$sd[i]   <- stats::sd(valid_data)
     } else {
