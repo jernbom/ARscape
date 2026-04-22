@@ -75,7 +75,7 @@ calc_arscore <- function(norm_log,
 
     # Logic tree:
     # 1. Compute mean and sd if possible (>1 valid points AND variance exists)
-    if (n_valid > 1 && isTRUE(stats::sd(valid_data) > 0) ) {
+    if (n_valid > 1 && isTRUE(stats::sd(valid_data) > 1e-6) ) {
       dist_info$mean[i] <- mean(valid_data)
       dist_info$sd[i]   <- stats::sd(valid_data)
 
