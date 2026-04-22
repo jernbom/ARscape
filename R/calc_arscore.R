@@ -37,6 +37,12 @@ calc_arscore <- function(norm_log,
 
   pool_values <- background_pool$log2fc
 
+  # Clean the source data and warn if NAs are present
+  if (any(is.na(pool_values))) {
+    warning("Unexpected NAs found in pool_values (background_pool$log2fc). Dropping NAs prior to simulation.")
+    pool_values <- pool_values[!is.na(pool_values)]
+  }
+
   # Pre-allocate matrix for simulation results
   # Rows = representations, Cols = 1000 simulations
   sim_matrix <- matrix(NA, nrow = length(representations), ncol = 1000)
@@ -55,8 +61,6 @@ calc_arscore <- function(norm_log,
   }
 
   # 2. Calculate Gaussian Parameters (Mean and SD)
-  # For a normal distribution, the Maximum Likelihood Estimates (MLE) are exactly
-  # the sample mean and standard deviation. No numerical fitting required!
   dist_info <- data.frame(
     total_peps = representations,
     mean = NA_real_,
@@ -67,16 +71,24 @@ calc_arscore <- function(norm_log,
   for (i in seq_along(representations)) {
     valid_data <- sim_matrix[i, ]
     valid_data <- valid_data[!is.na(valid_data)]
+    n_valid <- length(valid_data)
 
-    # Safety check for variance
-    if (length(valid_data) > 1 && isTRUE(stats::var(valid_data) > 0) ) {
+    # Logic tree:
+    # 1. Compute mean and sd if possible (>1 valid points AND variance exists)
+    if (n_valid > 1 && isTRUE(stats::sd(valid_data) > 0) ) {
       dist_info$mean[i] <- mean(valid_data)
       dist_info$sd[i]   <- stats::sd(valid_data)
-    } else {
-      # Skip if there is no variance
-      warning(paste("No variance in null data for n =", representations[i], "- using fallback values."))
+
+      # 2. Else mean only and supply small value for sd (exactly 1 point OR zero variance)
+    } else if (n_valid >= 1) {
+      warning(sprintf("No/undefined variance in null data for n = %d - using fallback SD.", representations[i]))
       dist_info$mean[i] <- mean(valid_data)
       dist_info$sd[i]   <- 1e-6
+
+      # 3. Else skip the spline for that representation (0 valid points)
+    } else {
+      warning(sprintf("No valid simulation data for n = %d - skipping representation.", representations[i]))
+      # Variables naturally remain NA_real_, which filters them out safely later
     }
 
     # Store a pseudo-fit object to preserve compatibility with quantile extraction
@@ -89,11 +101,20 @@ calc_arscore <- function(norm_log,
   names(fits) <- representations
   dist_info$fits <- fits
 
+  # Sanitize dist_info before the spline
+  # Now we just need to drop the skipped representations (where mean/sd are NA)
+  dist_clean <- dist_info %>%
+    dplyr::filter(!is.na(mean), !is.na(sd))
+
+  # Enforce a minimum data point check
+  # smooth.spline requires >= 4 unique x values
+  if (nrow(dist_clean) < 4) {
+    stop("Critical Error: Fewer than 4 valid data points remaining. Cannot fit smooth.spline(). Check background_pool for excessive NAs or zero variance.")
+  }
+
   # 3. Spline Interpolation of Normal Parameters
-  # Mean can be negative, so we interpolate on linear scale.
-  # SD is strictly positive, so log10 remains safer to prevent predicting negative SDs.
-  mean_spline <- stats::smooth.spline(x = log10(dist_info$total_peps), y = dist_info$mean, spar = 0.5)
-  sd_spline   <- stats::smooth.spline(x = log10(dist_info$total_peps), y = log10(dist_info$sd), spar = 0.5)
+  mean_spline <- stats::smooth.spline(x = log10(dist_clean$total_peps), y = dist_clean$mean, spar = 0.5)
+  sd_spline   <- stats::smooth.spline(x = log10(dist_clean$total_peps), y = log10(dist_clean$sd), spar = 0.5)
 
   # 4. Apply to Data
   # Predict parameters for the actual 'total_peps' observed in the data
