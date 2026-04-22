@@ -214,10 +214,10 @@ run_iterative_landscape <- function(norm_log,
   }
 
 
-  output_debug <- list()
-  output_debug[[1]] <- scores
-  output_debug[[2]] <- hits_log_debug
-  output_debug[[3]] <- results_debug[[2]]
+  # output_debug <- list()
+  # output_debug[[1]] <- scores
+  # output_debug[[2]] <- hits_log_debug
+  # output_debug[[3]] <- results_debug[[2]]
 
-  return(output_debug)
+  return(scores)
 }
