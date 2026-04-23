@@ -43,6 +43,25 @@ calc_arscore <- function(norm_log,
     pool_values <- pool_values[is.finite(pool_values)]
   }
 
+  max_needed <- max(representations)
+  if (length(pool_values) < max_needed) {
+    warning(sprintf("Insufficient background peptides (Pool size: %d, Max needed: %d). Returning NAs.",
+                    length(pool_values), max_needed))
+
+    # Gracefully return NAs so the pipeline doesn't crash
+    results <- norm_log %>%
+      dplyr::mutate(
+        null_mean = NA_real_,
+        null_sd   = NA_real_,
+        ARscore   = NA_real_,
+        p_val     = NA_real_,
+        nlog_p    = NA_real_
+      )
+
+    # Return empty dist_info to match expected list output
+    return(list(results, data.frame()))
+  }
+
   # Pre-allocate matrix for simulation results
   # Rows = representations, Cols = 1000 simulations
   sim_matrix <- matrix(NA, nrow = length(representations), ncol = 1000)
@@ -52,29 +71,13 @@ calc_arscore <- function(norm_log,
   for (i in seq_along(representations)) {
     n <- representations[i]
 
-    tryCatch({
       # We replicate the mean calculation 1000 times
       sim_means <- replicate(1000, {
-        # Explicitly using base::sample to prevent any potential package masking
-        mean(base::sample(pool_values, n, replace = FALSE))
+        # sample.int to prevent undesired behavior at the edge case length(pool_values) == 1
+        mean(pool_values[base::sample.int(length(pool_values), n, replace = FALSE)])
       })
 
       sim_matrix[i, ] <- sim_means
-
-    }, error = function(e) {
-      # If sampling fails, save the exact environment state to a file
-      dump_list <- list(
-        error_message = e$message,
-        pool_values = pool_values,
-        pool_length = length(pool_values),
-        n_requested = n,
-        exclusion_method = exclusion_method
-      )
-      saveRDS(dump_list, "sampling_crash_dump.rds")
-
-      # Re-throw the error to halt execution
-      stop(paste("CRITICAL: Failed at sampling step! Dumped environment to 'sampling_crash_dump.rds'. Original error:", e$message))
-    })
   }
 
   # 2. Calculate Gaussian Parameters (Mean and SD)
