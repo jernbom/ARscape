@@ -95,7 +95,7 @@ run_arscape <- function(fold_change,
 
     # 4. Replace 0s with the corresponding sample-specific LOD
     # Create a logical mask of exact zeros
-    zero_mask <- fc_mat == 0
+    zero_mask <- fc_mat == 0 & !is.na(fc_mat)
 
     # Broadcast the vector of sample_lods into a matrix of identical dimensions.
     # byrow = TRUE ensures the LODs align correctly with the columns.
