@@ -74,15 +74,54 @@ run_arscape <- function(fold_change,
       dplyr::filter(!.data[[annotation_cols[[1]]]] %in% excluded_peptides)
   }
 
-  # 2. Pivot to Long Format and log2 transform fold changes
-  long_data <- clean_fc %>%
-    tidyr::pivot_longer(
-      cols = -tidyselect::all_of(annotation_cols),
-      names_to = "sample_id",
-      values_to = "fc"
-    ) %>%
-    mutate(log2fc = log2(fc)) %>%
-    select(-fc)
+  # --- 2. Efficient and safe log2 transform and pivot to long format ---
+
+    # 1. Identify just the numeric sample columns
+    sample_cols <- setdiff(names(clean_fc), annotation_cols)
+
+    # 2. Extract those columns as a base R matrix for C-compiled speed
+    fc_mat <- as.matrix(clean_fc[sample_cols])
+
+    # 3. Calculate the sample-wise Limit of Detection (LOD)
+    # margin = 2 applies the function column-wise (per sample)
+    sample_lods <- apply(fc_mat, 2, function(x) {
+      non_zeros <- x[x > 0 & !is.na(x)]
+
+      # Guardrail: If a sample is completely zero/NA, return NA to avoid Inf
+      if (length(non_zeros) == 0) return(NA_real_)
+
+      min(non_zeros) / 2
+    })
+
+    # 4. Replace 0s with the corresponding sample-specific LOD
+    # Create a logical mask of exact zeros
+    zero_mask <- fc_mat == 0
+
+    # Broadcast the vector of sample_lods into a matrix of identical dimensions.
+    # byrow = TRUE ensures the LODs align correctly with the columns.
+    lod_matrix <- matrix(sample_lods,
+                         nrow = nrow(fc_mat),
+                         ncol = ncol(fc_mat),
+                         byrow = TRUE)
+
+    # Replace the zeros using the mask (instantaneous subsetting)
+    fc_mat[zero_mask] <- lod_matrix[zero_mask]
+
+    # 5. Perform the log2 transformation on the entire matrix at once
+    log_mat <- log2(fc_mat)
+
+    # 6. Overwrite the original columns in the dataframe with the transformed matrix
+    clean_fc[sample_cols] <- log_mat
+
+    # 7. Pivot directly to the final state
+    long_data <- clean_fc %>%
+      tidyr::pivot_longer(
+        cols = -tidyselect::all_of(annotation_cols),
+        names_to = "sample_id",
+        values_to = "log2fc"
+      )
+
+  # ------------------------------------------------
 
   # 3. Pre-calculate Group Metrics (Aggregation)
   # Sum scores and count peptides per species/genus/group
