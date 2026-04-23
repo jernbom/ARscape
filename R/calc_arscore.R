@@ -8,7 +8,7 @@
 #' @param all_peptide_fcs Data frame containing all peptide fold changes for an individual sample.
 #' @param positives Data frame containing taxa determined to be significant (excluded from null).
 #' @param exclusion_method Character string; method for excluding likely reactive peptides.
-#'   Options: "genus", "species", "group".
+#'  Options: "genus", "species", "group".
 #' @param seed Integer seed for reproducibility of random sampling.
 #'
 #' @return A data frame with added columns for mean, sd, ARscore, p_val, and nlog_p.
@@ -52,12 +52,29 @@ calc_arscore <- function(norm_log,
   for (i in seq_along(representations)) {
     n <- representations[i]
 
-    # We replicate the mean calculation 1000 times
-    sim_means <- replicate(1000, {
-      mean(sample(pool_values, n, replace = FALSE))
-    })
+    tryCatch({
+      # We replicate the mean calculation 1000 times
+      sim_means <- replicate(1000, {
+        # Explicitly using base::sample to prevent any potential package masking
+        mean(base::sample(pool_values, n, replace = FALSE))
+      })
 
-    sim_matrix[i, ] <- sim_means
+      sim_matrix[i, ] <- sim_means
+
+    }, error = function(e) {
+      # If sampling fails, save the exact environment state to a file
+      dump_list <- list(
+        error_message = e$message,
+        pool_values = pool_values,
+        pool_length = length(pool_values),
+        n_requested = n,
+        exclusion_method = exclusion_method
+      )
+      saveRDS(dump_list, "sampling_crash_dump.rds")
+
+      # Re-throw the error to halt execution
+      stop(paste("CRITICAL: Failed at sampling step! Dumped environment to 'sampling_crash_dump.rds'. Original error:", e$message))
+    })
   }
 
   # 2. Calculate Gaussian Parameters (Mean and SD)
