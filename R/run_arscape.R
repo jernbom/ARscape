@@ -127,7 +127,7 @@ run_arscape <- function(fold_change,
   gc()
 
   # 5. Parallel Map
-  final_results <- furrr::future_pmap(
+  final_results <- furrr::future_pmap_dbl(
     .l = list(
       norm_log = grouped_metrics_list,
       all_peptide_fcs = long_data_list
